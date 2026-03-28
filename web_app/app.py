@@ -11,7 +11,7 @@ import cv2
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from web_app.utils import preprocess_canvas_image, reshape_for_prediction
+from web_app.utils import preprocess_canvas_image, reshape_for_prediction, preprocess_uploaded_image
 from src.explainability import grad_cam, get_overlayed_image
 
 # --- Page Config ---
@@ -61,6 +61,12 @@ def load_all_models():
 
 models_dict = load_all_models()
 
+# --- Initialize Session State ---
+if 'history' not in st.session_state:
+    st.session_state.history = []
+if 'last_prediction' not in st.session_state:
+    st.session_state.last_prediction = None
+
 # --- Sidebar Layout ---
 with st.sidebar:
     st.markdown('### Model Configuration')
@@ -77,9 +83,16 @@ with st.sidebar:
     show_gradcam = st.toggle("Show Grad-CAM Heatmap", value=True, help="Visualize where the CNN is focusing to make its prediction.")
     
     st.markdown('---')
+    st.markdown('### Prediction History')
+    if not st.session_state.history:
+        st.info("No predictions yet.")
+    for item in reversed(st.session_state.history[-5:]): # Show last 5
+        st.write(f"**{item['digit']}** ({item['model']}) - {item['confidence']:.1f}%")
+
+    st.markdown('---')
     st.markdown('### Instruction')
     st.markdown(
-        "1. Draw a digit (0-9) inside the black box.\n"
+        "1. Draw a digit OR Upload an image OR Select a sample.\n"
         "2. Click the **Predict** button.\n"
         "3. See the model's confidence across all classes."
     )
@@ -105,69 +118,98 @@ with col1:
     )
     st.markdown('</div>', unsafe_allow_html=True)
     
-    predict_btn = st.button("Predict 🚀", use_container_width=True, type="primary")
+    predict_btn = st.button("Predict Canvas 🚀", use_container_width=True, type="primary")
 
-with col2:
-    st.markdown('<div class="sub-header">Live Prediction Results:</div>', unsafe_allow_html=True)
+    st.markdown('---')
+    st.markdown('<div class="sub-header">OR Upload Image:</div>', unsafe_allow_html=True)
+    uploaded_file = st.file_uploader("Choose an image...", type=["png", "jpg", "jpeg"])
     
-    results_placeholder = st.empty()
+    st.markdown('---')
+    st.markdown('<div class="sub-header">OR Try a Sample:</div>', unsafe_allow_html=True)
+    sample_files = glob.glob('web_app/static/samples/*.png')
+    if sample_files:
+        sample_cols = st.columns(5)
+        selected_sample = None
+        for i, sample_path in enumerate(sample_files[:10]):
+            with sample_cols[i % 5]:
+                digit_label = os.path.basename(sample_path).split('_')[1].split('.')[0]
+                if st.button(f"{digit_label}", key=f"btn_{i}"):
+                    selected_sample = sample_path
+    
+    # Combined Predict Logic
+    final_input_image = None
+    source = None
     
     if predict_btn and canvas_result.image_data is not None:
-        raw_image = canvas_result.image_data
+        if np.max(canvas_result.image_data) > 0:
+            final_input_image = preprocess_canvas_image(canvas_result.image_data)
+            source = "Canvas"
+            
+    elif uploaded_file is not None:
+        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+        opencv_img = cv2.imdecode(file_bytes, 1)
+        final_input_image = preprocess_uploaded_image(opencv_img)
+        source = "Upload"
         
-        # Check if drawn (canvas gives non-zero pixels)
-        if np.max(raw_image) > 0:
-            # Preprocess
-            normalized_img_2d = preprocess_canvas_image(raw_image)
-            model_input = reshape_for_prediction(normalized_img_2d)
+    elif selected_sample:
+        opencv_img = cv2.imread(selected_sample)
+        final_input_image = preprocess_uploaded_image(opencv_img)
+        source = f"Sample ({os.path.basename(selected_sample)})"
+
+with col2:
+    results_placeholder = st.empty()
+    
+    if final_input_image is not None:
+        model_input = reshape_for_prediction(final_input_image)
+        
+        # Predict
+        selected_model = models_dict[model_choice]
+        pred_probs = selected_model.predict(model_input)[0]
+        pred_class = np.argmax(pred_probs)
+        confidence = pred_probs[pred_class]
+        
+        # Save to history
+        st.session_state.history.append({
+            "digit": pred_class,
+            "confidence": confidence * 100,
+            "model": model_choice,
+            "source": source
+        })
+        
+        with results_placeholder.container():
+            st.success(f"**Predicted Digit:** {pred_class} (Confidence: {confidence*100:.2f}%)")
+            st.info(f"Source: {source}")
             
-            # Predict
-            selected_model = models_dict[model_choice]
-            pred_probs = selected_model.predict(model_input)[0]
-            pred_class = np.argmax(pred_probs)
-            confidence = pred_probs[pred_class]
-            
-            with results_placeholder.container():
-                st.success(f"**Predicted Digit:** {pred_class} (Confidence: {confidence*100:.2f}%)")
-                
-                # Confidence Chart
-                fig = go.Figure(data=[
-                    go.Bar(
-                        x=[str(i) for i in range(10)], 
-                        y=pred_probs, 
-                        marker_color=['#00E1FF' if i == pred_class else '#3A3A3C' for i in range(10)]
-                    )
-                ])
-                fig.update_layout(
-                    title="Model Confidence per Class",
-                    xaxis_title="Classification Digit",
-                    yaxis_title="Probability",
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    font=dict(color='#F2F2F7'),
-                    margin=dict(l=0, r=0, b=0, t=40)
+            # Confidence Chart
+            fig = go.Figure(data=[
+                go.Bar(
+                    x=[str(i) for i in range(10)], 
+                    y=pred_probs, 
+                    marker_color=['#00E1FF' if i == pred_class else '#3A3A3C' for i in range(10)]
                 )
-                fig.update_yaxes(range=[0, 1])
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # XAI (Explainability)
-                if show_gradcam:
-                    # Grad-CAM only works natively with Conv Layers, check if CNN string is in model choice
-                    if 'Cnn' in model_choice or 'cnn' in model_choice.lower():
-                        st.markdown('#### What the AI Sees (Grad-CAM)')
-                        st.caption("Warm colors (red/orange) represent the regions that strongly activated the neural network's final layers.")
-                        heatmap = grad_cam(selected_model, model_input[0])
-                        # Apply to the pre-processed visual
-                        overlayed_img = get_overlayed_image(normalized_img_2d, heatmap, alpha=0.5)
-                        
-                        # Resize for better view in web app
-                        overlayed_img = cv2.resize(overlayed_img, (150, 150), interpolation=cv2.INTER_NEAREST)
-                        
-                        st.image(overlayed_img, width=150)
-                    else:
-                        st.info("Grad-CAM visualization is only supported for Convolutional Neural Networks (CNNs).")
-                        
-        else:
-            results_placeholder.warning("Please draw a digit on the canvas first!")
+            ])
+            fig.update_layout(
+                title="Model Confidence per Class",
+                xaxis_title="Classification Digit",
+                yaxis_title="Probability",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='#F2F2F7'),
+                margin=dict(l=0, r=0, b=0, t=40)
+            )
+            fig.update_yaxes(range=[0, 1])
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # XAI (Explainability)
+            if show_gradcam:
+                if 'Cnn' in model_choice or 'cnn' in model_choice.lower():
+                    st.markdown('#### What the AI Sees (Grad-CAM)')
+                    st.caption("Warm colors (red/orange) represent high activation regions.")
+                    heatmap = grad_cam(selected_model, model_input[0])
+                    overlayed_img = get_overlayed_image(final_input_image, heatmap, alpha=0.5)
+                    overlayed_img = cv2.resize(overlayed_img, (150, 150), interpolation=cv2.INTER_NEAREST)
+                    st.image(overlayed_img, width=150)
+                else:
+                    st.info("Grad-CAM visualization is only supported for CNNs.")
     else:
-        results_placeholder.info("Awaiting user input...")
+        results_placeholder.info("Awaiting user input (Draw, Upload, or select Sample)...")

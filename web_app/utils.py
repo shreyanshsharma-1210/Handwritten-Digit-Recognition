@@ -29,3 +29,24 @@ def reshape_for_prediction(normalized_image):
     final_image = np.expand_dims(normalized_image, axis=-1)
     final_image = np.expand_dims(final_image, axis=0)
     return final_image
+
+def preprocess_uploaded_image(opencv_image):
+    """
+    Process an uploaded image to 28x28 grayscale normalized.
+    """
+    if len(opencv_image.shape) == 3:
+        gray = cv2.cvtColor(opencv_image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = opencv_image
+        
+    # Invert colors if needed (MNIST is white digits on black background)
+    # Most user uploads are black digits on white background
+    if np.mean(gray) > 127:
+        gray = cv2.bitwise_not(gray)
+        
+    # Resize
+    resized = cv2.resize(gray, (28, 28), interpolation=cv2.INTER_AREA)
+    
+    # Normalize
+    normalized = resized.astype('float32') / 255.0
+    return normalized
