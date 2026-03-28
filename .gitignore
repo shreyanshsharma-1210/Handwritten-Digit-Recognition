@@ -5,7 +5,7 @@ __pycache__/
 data/raw/
 data/processed/
 data/augmented/
-models/saved_models/
+# models/saved_models/ — included for Streamlit Cloud deployment
 results/figures/
 results/logs/
 results/reports/
