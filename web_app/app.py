@@ -104,10 +104,16 @@ with st.sidebar:
         st.error("No pre-trained models found. Please check that `.keras` files exist in `models/saved_models/`.")
         st.stop()
         
+    # Sort so CNN models appear first (they support Grad-CAM)
+    sorted_model_names = sorted(
+        models_dict.keys(),
+        key=lambda n: (0 if 'cnn' in n.lower() else 1, n)
+    )
     model_choice = st.selectbox(
         "Model Architecture:",
-        list(models_dict.keys()),
-        help="Select which pre-trained neural network to use for prediction."
+        sorted_model_names,
+        index=0,
+        help="CNN models support Grad-CAM heatmaps. Simple NN does not."
     )
     
     st.markdown('### 🛠️ Explainable AI (XAI)')
@@ -233,8 +239,9 @@ with col2:
             st.plotly_chart(fig, use_container_width=True)
             
             # XAI (Explainability)
+            is_cnn = 'cnn' in model_choice.lower()
             if show_gradcam:
-                if 'Cnn' in model_choice or 'cnn' in model_choice.lower():
+                if is_cnn:
                     st.markdown('---')
                     st.markdown('#### 🔍 Visual Focus Map (Grad-CAM)')
                     st.caption("Warm regions indicate where the model detected digit features.")
@@ -253,6 +260,6 @@ with col2:
                         st.error("⚠️ Visual Focus Map (Grad-CAM) could not be generated for this prediction.")
                         st.caption(f"Reason: {type(e).__name__}. The model might require re-training to support XAI features.")
                 else:
-                    st.info("💡 Grad-CAM visualization is only supported for CNN architectures.")
+                    st.info("💡 Grad-CAM is only available for CNN models. Select **Cnn Basic** or **Cnn Advanced Augmented** from the sidebar.")
     else:
         results_placeholder.info("👋 Awaiting input. Please draw on the canvas, upload a file, or select a sample digit.")
