@@ -69,12 +69,24 @@ st.markdown('<div class="main-header">🧠 DigitMind AI</div>', unsafe_allow_htm
 @st.cache_resource
 def load_all_models():
     models = {}
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    model_paths = glob.glob(os.path.join(base_dir, 'models', 'saved_models', '*.keras'))
+    # Try multiple base directories for local & Streamlit Cloud compatibility
+    candidates = [
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),  # parent of web_app/
+        os.getcwd(),                                                    # current working dir
+        os.path.dirname(os.path.abspath(__file__)),                    # web_app/ itself
+    ]
+    model_paths = []
+    for base_dir in candidates:
+        model_paths = glob.glob(os.path.join(base_dir, 'models', 'saved_models', '*.keras'))
+        if model_paths:
+            break
     for path in model_paths:
         name = os.path.basename(path).replace('_best.keras', '').replace('_', ' ').title()
-        model = tf.keras.models.load_model(path)
-        models[name] = model
+        try:
+            model = tf.keras.models.load_model(path)
+            models[name] = model
+        except Exception as e:
+            st.warning(f"Could not load model {os.path.basename(path)}: {e}")
     return models
 
 models_dict = load_all_models()
@@ -89,7 +101,7 @@ if 'selected_sample' not in st.session_state:
 with st.sidebar:
     st.markdown('### ⚙️ Configuration')
     if not models_dict:
-        st.warning("No models found! Please train a model first.")
+        st.error("No pre-trained models found. Please check that `.keras` files exist in `models/saved_models/`.")
         st.stop()
         
     model_choice = st.selectbox(
