@@ -2,7 +2,7 @@
 
 A comprehensive deep learning project for recognizing handwritten digits from the MNIST dataset using multiple architectures (Simple NN, Basic CNN, Advanced CNN) and featuring advanced Explainable AI (XAI) visualizations.
 
-![Project Banner](results/figures/cnn_basic_training_curves.png)
+**Live Demo Link :** https://handwritten-digit-recognition-shreyansh.streamlit.app/
 
 ## 🚀 Features
 - **Multiple Architectures**: Baseline Dense NN, LeNet-5 Style CNN, and a deep Advanced CNN with BatchNorm.
